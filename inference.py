@@ -22,6 +22,8 @@ class PoseDetector:
         result = self.pose.process(image)
 
         feedback = []
+        deviations = []
+
         if result.pose_landmarks:
             # Draw landmarks
             self.mp_drawing_utils.draw_landmarks(
@@ -51,12 +53,25 @@ class PoseDetector:
                 landmarks[self.mp_pose.PoseLandmark.LEFT_ANKLE],
             )
 
-            # Compare with reference pose
-            if abs(left_arm_angle - self.reference_pose["left_arm_angle"]) > 10:
+            # Compare with reference pose and calculate deviations
+            left_arm_deviation = abs(left_arm_angle - self.reference_pose["left_arm_angle"])
+            if left_arm_deviation > 20:
                 feedback.append("Raise your left arm to 90 degrees.")
-            if abs(right_arm_angle - self.reference_pose["right_arm_angle"]) > 10:
+                deviations.append(left_arm_deviation)
+
+            right_arm_deviation = abs(right_arm_angle - self.reference_pose["right_arm_angle"])
+            if right_arm_deviation > 20:
                 feedback.append("Straighten your right arm.")
-            if abs(left_leg_angle - self.reference_pose["left_leg_angle"]) > 10:
+                deviations.append(right_arm_deviation)
+
+            left_leg_deviation = abs(left_leg_angle - self.reference_pose["left_leg_angle"])
+            if left_leg_deviation > 20:
                 feedback.append("Bend your left knee more.")
+                deviations.append(left_leg_deviation)
+
+        # Select the largest deviation feedback
+        if deviations:
+            max_index = deviations.index(max(deviations))
+            feedback = [feedback[max_index]]
 
         return image, feedback
