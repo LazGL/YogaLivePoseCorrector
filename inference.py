@@ -1,147 +1,77 @@
-import time
+import mediapipe as mp
+import math
 import cv2
-import numpy as np
-import onnxruntime
+from utils import calculate_angle
 
-from utils import draw_detections
+class PoseDetector:
+    def __init__(self):
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose()
+        self.mp_drawing_utils = mp.solutions.drawing_utils
+        self.mp_drawing_style = mp.solutions.drawing_styles
+        self.drawing_spec = self.mp_drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2)
 
+        self.reference_pose = {
+            "left_arm_angle": 90,  # Ideal angle between left shoulder, elbow, and wrist
+            "right_arm_angle": 180,  # Ideal angle for the right arm
+            "left_leg_angle": 90,  # Angle between hip, knee, and ankle
+        }
 
-class YOLOv10:
-    def __init__(self, path):
+    def detect_pose(self, image):
+        # Process the image with MediaPipe Pose
+        result = self.pose.process(image)
 
-        # Initialize model
-        self.initialize_model(path)
+        feedback = []
+        deviations = []
 
-    def __call__(self, image):
-        return self.detect_objects(image)
+        if result.pose_landmarks:
+            # Draw landmarks
+            self.mp_drawing_utils.draw_landmarks(
+                image,
+                result.pose_landmarks,
+                self.mp_pose.POSE_CONNECTIONS,
+                self.drawing_spec,
+            )
 
-    def initialize_model(self, path):
-        self.session = onnxruntime.InferenceSession(
-            path, providers=onnxruntime.get_available_providers()
-        )
-        # Get model info
-        self.get_input_details()
-        self.get_output_details()
+            # Extract keypoints
+            landmarks = result.pose_landmarks.landmark
 
-    def detect_objects(self, image, conf_threshold=0.3):
-        input_tensor = self.prepare_input(image)
+            # Calculate angles for feedback
+            left_arm_angle = calculate_angle(
+                landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER],
+                landmarks[self.mp_pose.PoseLandmark.LEFT_ELBOW],
+                landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST],
+            )
+            right_arm_angle = calculate_angle(
+                landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER],
+                landmarks[self.mp_pose.PoseLandmark.RIGHT_ELBOW],
+                landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST],
+            )
+            left_leg_angle = calculate_angle(
+                landmarks[self.mp_pose.PoseLandmark.LEFT_HIP],
+                landmarks[self.mp_pose.PoseLandmark.LEFT_KNEE],
+                landmarks[self.mp_pose.PoseLandmark.LEFT_ANKLE],
+            )
 
-        # Perform inference on the image
-        new_image = self.inference(image, input_tensor, conf_threshold)
+            # Compare with reference pose and calculate deviations
+            left_arm_deviation = abs(left_arm_angle - self.reference_pose["left_arm_angle"])
+            if left_arm_deviation > 20:
+                feedback.append("Raise your left arm to 90 degrees.")
+                deviations.append(left_arm_deviation)
 
-        return new_image
+            right_arm_deviation = abs(right_arm_angle - self.reference_pose["right_arm_angle"])
+            if right_arm_deviation > 20:
+                feedback.append("Straighten your right arm.")
+                deviations.append(right_arm_deviation)
 
-    def prepare_input(self, image):
-        self.img_height, self.img_width = image.shape[:2]
+            left_leg_deviation = abs(left_leg_angle - self.reference_pose["left_leg_angle"])
+            if left_leg_deviation > 20:
+                feedback.append("Bend your left knee more.")
+                deviations.append(left_leg_deviation)
 
-        input_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Select the largest deviation feedback
+        if deviations:
+            max_index = deviations.index(max(deviations))
+            feedback = [feedback[max_index]]
 
-        # Resize input image
-        input_img = cv2.resize(input_img, (self.input_width, self.input_height))
-
-        # Scale input pixel values to 0 to 1
-        input_img = input_img / 255.0
-        input_img = input_img.transpose(2, 0, 1)
-        input_tensor = input_img[np.newaxis, :, :, :].astype(np.float32)
-
-        return input_tensor
-
-    def inference(self, image, input_tensor, conf_threshold=0.3):
-        start = time.perf_counter()
-        outputs = self.session.run(
-            self.output_names, {self.input_names[0]: input_tensor}
-        )
-
-        print(f"Inference time: {(time.perf_counter() - start)*1000:.2f} ms")
-        boxes, scores, class_ids, = self.process_output(outputs, conf_threshold)
-        return self.draw_detections(image, boxes, scores, class_ids)
-
-    def process_output(self, output, conf_threshold=0.3):
-        predictions = np.squeeze(output[0])
-
-        # Filter out object confidence scores below threshold
-        scores = predictions[:, 4]
-        predictions = predictions[scores > conf_threshold, :]
-        scores = scores[scores > conf_threshold]
-
-        if len(scores) == 0:
-            return [], [], []
-
-        # Get the class with the highest confidence
-        class_ids = predictions[:, 5].astype(int)
-
-        # Get bounding boxes for each object
-        boxes = self.extract_boxes(predictions)
-
-        return boxes, scores, class_ids
-
-    def extract_boxes(self, predictions):
-        # Extract boxes from predictions
-        boxes = predictions[:, :4]
-
-        # Scale boxes to original image dimensions
-        boxes = self.rescale_boxes(boxes)
-
-        # Convert boxes to xyxy format
-        #boxes = xywh2xyxy(boxes)
-
-        return boxes
-
-    def rescale_boxes(self, boxes):
-        # Rescale boxes to original image dimensions
-        input_shape = np.array(
-            [self.input_width, self.input_height, self.input_width, self.input_height]
-        )
-        boxes = np.divide(boxes, input_shape, dtype=np.float32)
-        boxes *= np.array(
-            [self.img_width, self.img_height, self.img_width, self.img_height]
-        )
-        return boxes
-
-    def draw_detections(self, image, boxes, scores, class_ids, draw_scores=True, mask_alpha=0.4):
-        return draw_detections(
-            image, boxes, scores, class_ids, mask_alpha
-        )
-
-    def get_input_details(self):
-        model_inputs = self.session.get_inputs()
-        self.input_names = [model_inputs[i].name for i in range(len(model_inputs))]
-
-        self.input_shape = model_inputs[0].shape
-        self.input_height = self.input_shape[2]
-        self.input_width = self.input_shape[3]
-
-    def get_output_details(self):
-        model_outputs = self.session.get_outputs()
-        self.output_names = [model_outputs[i].name for i in range(len(model_outputs))]
-
-
-if __name__ == "__main__":
-    import requests
-    import tempfile
-    from huggingface_hub import hf_hub_download
-
-    model_file = hf_hub_download(
-        repo_id="onnx-community/yolov10s", filename="onnx/model.onnx"
-    )
-
-    yolov8_detector = YOLOv10(model_file)
-
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-        f.write(
-            requests.get(
-                "https://live.staticflickr.com/13/19041780_d6fd803de0_3k.jpg"
-            ).content
-        )
-        f.seek(0)
-        img = cv2.imread(f.name)
-
-    # # Detect Objects
-    combined_image = yolov8_detector.detect_objects(img)
-
-
-    # Draw detections
-    cv2.namedWindow("Output", cv2.WINDOW_NORMAL)
-    cv2.imshow("Output", combined_image)
-    cv2.waitKey(0)
-
+        return image, feedback

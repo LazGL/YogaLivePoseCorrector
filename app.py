@@ -1,90 +1,86 @@
+import pyttsx3
+import threading
+import time
 import gradio as gr
-#models
 import cv2
-import mediapipe as mp
-from huggingface_hub import hf_hub_download
 from gradio_webrtc import WebRTC
-from twilio.rest import Client
-import os
-from inference import YOLOv10
+from inference import PoseDetector
 
-model_file = hf_hub_download(
-    repo_id="onnx-community/yolov10n", filename="onnx/model.onnx"
-)
+# Initialize PoseDetector
+pose_detector = PoseDetector()
 
-model = YOLOv10(model_file)
-
-# account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
-# auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
-
-# if account_sid and auth_token:
-#     client = Client(account_sid, auth_token)
-
-#     token = client.tokens.create()
-
-#     rtc_configuration = {
-#         "iceServers": token.ice_servers,
-#         "iceTransportPolicy": "relay",
-#     }
-# else:
-#     rtc_configuration = None
 rtc_configuration = None
 
+# Global feedback state
+feedback_state = {"feedback": ""}
 
-def detection(image, conf_threshold=0.3):
-    image = cv2.resize(image, (model.input_width, model.input_height))
-    new_image = model.detect_objects(image, conf_threshold)
-    return cv2.resize(new_image, (500, 500))
+# Initialize TTS engine
+tts_engine = pyttsx3.init()
 
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose()
+def detect_pose(image):
+    """
+    Process the image for pose detection and annotate it.
+    """
+    global feedback_state
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    annotated_image, feedback = pose_detector.detect_pose(image)
+    feedback_state["feedback"] = "\n".join(feedback)  # Update global feedback state
+    return cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR)
 
-def detection_with_mediapipe(image):
-    # convert rgb for mediapipe
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = pose.process(rgb_image)
-    
-    if results.pose_landmarks:
-        # overlay skeletons marks
-        mp.solutions.drawing_utils.draw_landmarks(
-            image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS
-        )
-    return image
+def update_feedback():
+    """
+    Fetch the latest feedback from the global state.
+    """
+    global feedback_state
+    return feedback_state["feedback"]
 
+def tts_worker():
+    """
+    Thread to read feedback aloud using TTS in the background.
+    """
+    last_feedback = ""
+    while True:
+        if feedback_state["feedback"] != last_feedback:
+            last_feedback = feedback_state["feedback"]
+            if last_feedback.strip():
+                tts_engine.say(last_feedback)
+                tts_engine.runAndWait()
+        time.sleep(1)  # Check for updates every second
 
-css = """.my-group {max-width: 600px !important; max-height: 600 !important;}
+# Start the TTS worker in a separate thread
+tts_thread = threading.Thread(target=tts_worker, daemon=True)
+tts_thread.start()
+
+css = """.my-group {max-width: 600px !important; max-height: 600px !important;}
                       .my-column {display: flex !important; justify-content: center !important; align-items: center !important};"""
-
 
 with gr.Blocks(css=css) as demo:
     gr.HTML(
         """
-    <h1 style='text-align: center'>
-    YOLOv10 Webcam Stream (Powered by WebRTC ⚡️)
-    </h1>
-    """
-    )
-    gr.HTML(
-        """
-        <h3 style='text-align: center'>
-        <a href='https://arxiv.org/abs/2405.14458' target='_blank'>arXiv</a> | <a href='https://github.com/THU-MIG/yolov10' target='_blank'>github</a>
-        </h3>
+        <h1 style='text-align: center'>
+        Yoga Pose Correction (Powered by WebRTC ⚡️)
+        </h1>
         """
     )
     with gr.Column(elem_classes=["my-column"]):
         with gr.Group(elem_classes=["my-group"]):
-            image = WebRTC(label="Stream", rtc_configuration=rtc_configuration)
-            conf_threshold = gr.Slider(
-                label="Confidence Threshold",
-                minimum=0.0,
-                maximum=1.0,
-                step=0.05,
-                value=0.30,
-            )
+            # Webcam video stream
+            video_stream = WebRTC(label="Stream", rtc_configuration=rtc_configuration)
 
-        image.stream(
-            fn=detection_with_mediapipe, inputs=[image, conf_threshold], outputs=[image], time_limit=10
+        # Feedback textbox
+        feedback_output = gr.Textbox(label="Live Feedback", lines=5)
+
+        # Stream video processing
+        video_stream.stream(
+            fn=detect_pose,
+            inputs=[video_stream],
+            outputs=[video_stream],
+            time_limit=120,
         )
+
+        # Timer for feedback updates
+        feedback_timer = gr.Timer(value=2)  # Ticks every 2s
+        feedback_timer.tick(fn=update_feedback, outputs=feedback_output)
 
 if __name__ == "__main__":
     demo.launch()
