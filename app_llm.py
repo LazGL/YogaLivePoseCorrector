@@ -4,6 +4,7 @@ from gradio_webrtc import WebRTC
 from inference_new import PoseComparison
 from tts_utils import text_to_speech  # Import the TTS function
 from css_style import css
+import threading
 
 # Initialize PoseDetector
 pose_detector = PoseComparison()
@@ -20,19 +21,34 @@ pictograms = [
 ]
 
 # Global feedback state
-feedback_state = {"feedback": ""}
+feedback_state = {"feedback": "", "accuracy_score": 0.0}
 last_feedback_text = None  # Global variable to store the last feedback text
 
 
-def detect_pose():
+def detect_pose(image):
     """
     Process the image for pose detection and annotate it.
     """
     global feedback_state
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    annotated_image, feedback, _ , _= pose_detector.run()
-    feedback_state["feedback"] = "\n".join(feedback)  # Update global feedback state
-    return cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR)
+    try:
+        print("detect_pose called")
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        annotated_image, feedback, accuracy_score = pose_detector.run(image)
+        
+        # Safely read feedback
+        with pose_detector.feedback_lock:
+            if feedback:
+                feedback_state["feedback"] = "\n".join(feedback)  # Update global feedback state
+            else:
+                feedback_state["feedback"] = ""  # Set to empty string if no feedback
+                
+        feedback_state["accuracy_score"] = accuracy_score
+        print("detect_pose completed")
+        return cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR)
+    except Exception as e:
+        print("Exception in detect_pose:", e)
+        # Return the original image or a placeholder
+        return image
 
 
 def update_feedback():
@@ -41,10 +57,12 @@ def update_feedback():
     """
     global feedback_state, last_feedback_text
     feedback_text = feedback_state['feedback']
+    accuracy_score = feedback_state.get('accuracy_score', 0.0) 
+    
     feedback_html = f"<div style='text-align: center;'>{feedback_text}</div>"
 
-    # Check if the feedback text has changed
-    if feedback_text != last_feedback_text:
+    # Check if the feedback text has changed and is not empty
+    if feedback_text != last_feedback_text and feedback_text.strip():
         # Generate audio from the feedback text
         audio_data = text_to_speech(feedback_text)
         # Update last_feedback_text
@@ -53,7 +71,7 @@ def update_feedback():
         # No change in feedback; do not update audio_data
         audio_data = None  # Returning None prevents the audio from replaying
 
-    return feedback_html, audio_data  # Return both HTML and audio
+    return feedback_html, audio_data , f"{accuracy_score:.2f}"# Return both HTML and audio
 
 
 with gr.Blocks(css=css) as demo:
@@ -83,6 +101,8 @@ with gr.Blocks(css=css) as demo:
                 # Audio output for TTS
                 audio_output = gr.Audio(type="filepath", label="Feedback Audio", autoplay=True, elem_id="feedback-audio")
 
+                # Accuracy score display
+                accuracy_output = gr.Textbox(label="Accuracy Score", elem_id="accuracy-score", interactive=False)
             # Stream video processing
             video_stream.stream(
                 fn=detect_pose,
@@ -110,8 +130,7 @@ with gr.Blocks(css=css) as demo:
 
     # Timer for feedback updates
     feedback_timer = gr.Timer(value=3)  # Ticks every 3 seconds
-    feedback_timer.tick(fn=update_feedback, outputs=[feedback_output, audio_output])
+    feedback_timer.tick(fn=update_feedback, outputs=[feedback_output, audio_output, accuracy_output])
 
 if __name__ == "__main__":
     demo.launch()
-
