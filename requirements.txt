@@ -1,0 +1,13 @@
+opencv-python
+# torch
+# torchvision
+# torchaudio
+executorch
+mediapipe
+flask
+gradio
+twilio
+gradio-webrtc
+onnxruntime
+gtts
+transformers
