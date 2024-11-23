@@ -10,3 +10,4 @@ twilio
 gradio-webrtc
 onnxruntime
 gtts
+transformers
