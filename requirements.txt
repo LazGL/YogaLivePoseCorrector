@@ -5,4 +5,8 @@ opencv-python
 executorch
 mediapipe
 flask
-
+gradio
+twilio
+gradio-webrtc
+onnxruntime
+gtts

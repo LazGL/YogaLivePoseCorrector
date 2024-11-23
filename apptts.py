@@ -76,6 +76,7 @@ import cv2
 from gradio_webrtc import WebRTC
 from inference import PoseDetector
 from tts_utils import text_to_speech  # Import the TTS function
+from css_style import css
 
 # Initialize PoseDetector
 pose_detector = PoseDetector()
@@ -114,65 +115,41 @@ def update_feedback():
 
     return feedback_html, audio_data  # Return both HTML and audio
 
-css = """
-.my-group {
-    max-width: 600px !important;
-    max-height: 600px !important;
-}
-.my-column {
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-}
-#custom-textbox div {
-    font-size: 32px;
-    color: #708090; /* Text color */
-    background-color: #ffffff; /* White background */
-    border: none !important;
-    border-radius: 8px; /* Rounded corners */
-    padding: 12px; /* Internal padding */
-    width: 700px !important; /* Force reduced width */
-    max-width: 700px !important;
-    height: auto; /* Auto-adjust height */
-    overflow-y: auto; /* Add vertical scroll if needed */
-    margin: 0 auto; /* Center the div horizontally */
-}
-.gradio-container {
-    background-color: #ffffff !important; /* Set background to white */
-    border: none !important; /* Remove faint border around components */
-}
-#custom-stream .webrtc-container {
-    border: none !important; /* Remove border around WebRTC stream */
-    box-shadow: none !important; /* Remove shadow */
-}
-"""
-
 with gr.Blocks(css=css) as demo:
     gr.HTML(
         """
-        <h1 style='text-align: center'>
-        Yoga Pose Correction
+        <h1 style='text-align: center; font-family: "Poppins", sans-serif; color: #2C3E50;'>
+        🧘 Yoga Pose Correction 🧘
         </h1>
         """
     )
-    with gr.Column(elem_classes=["my-column"]):
-        with gr.Group(elem_classes=["my-group"]):
-            # Webcam video stream
-            video_stream = WebRTC(label="Stream", elem_id="custom-stream")
+    with gr.Row():  # Create two columns
+        with gr.Column(scale=1, elem_classes=["left-column"]):  # Left column for webcam and feedback
+            with gr.Group(elem_classes=["my-group"]):
+                # Webcam video stream
+                video_stream = WebRTC(label="Stream", elem_id="custom-stream")
 
-        # Feedback displayed below the stream
-        with gr.Column(elem_classes=["my-column"]):
-            feedback_output = gr.HTML(elem_id="custom-textbox")
-            # Audio output for TTS
-            audio_output = gr.Audio(type="filepath", label="Feedback Audio", autoplay=True)
+            # Feedback displayed below the stream
+            with gr.Column(elem_classes=["my-column"]):
+                feedback_output = gr.HTML(elem_id="custom-textbox")
+                # Audio output for TTS
+                audio_output = gr.Audio(type="filepath", label="Feedback Audio", autoplay=True, elem_id="feedback-audio")
 
-        # Stream video processing
-        video_stream.stream(
-            fn=detect_pose,
-            inputs=[video_stream],
-            outputs=[video_stream],  # Video output only
-            time_limit=120,
-        )
+            # Stream video processing
+            video_stream.stream(
+                fn=detect_pose,
+                inputs=[video_stream],
+                outputs=[video_stream],
+                time_limit=120,
+            )
+
+        with gr.Column(scale=1, elem_classes=["right-column"]):  # Right column for pose image
+            gr.Image(
+                value="Tpose.png",  # Path to the image file
+                label="Target Pose",  # Optional label for the image
+                elem_id="pose-image",  # Optional element ID for further styling
+                type="filepath"  # Explicitly specify filepath
+            )
 
     # Timer for feedback updates
     feedback_timer = gr.Timer(value=3)  # Ticks every 3 seconds

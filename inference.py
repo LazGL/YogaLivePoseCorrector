@@ -9,7 +9,7 @@ class PoseDetector:
         self.pose = self.mp_pose.Pose()
         self.mp_drawing_utils = mp.solutions.drawing_utils
         self.drawing_spec = self.mp_drawing_utils.DrawingSpec(
-            color=(0, 255, 0), thickness=2, circle_radius=2
+            color=(173, 216, 230), thickness=2, circle_radius=2
         )
 
         # Updated reference angles for the desired pose
