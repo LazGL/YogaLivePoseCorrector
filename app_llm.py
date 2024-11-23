@@ -7,7 +7,7 @@ from css_style import css
 import threading
 
 # Initialize PoseDetector
-pose_detector = PoseComparison(reference_image_path='Tpose_test.png')
+pose_detector = PoseComparison(reference_image_path='target2.png')
 
 # Hardcoded index for the highlighted pictogram
 current_pictogram_index = 1

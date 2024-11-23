@@ -67,19 +67,23 @@ class PoseComparison:
 
     def generate_feedback(self, target_measurements, test_measurements, max_new_tokens_value):
         
+        
+        
         print("FEEDBACK GENERATED CALLED ______________________________________________________________")
         merged_measurements = {key: {
             'difference': round(abs(target_measurements[key] - test_measurements[key])),
             'adjustment': '+' if target_measurements[key] > test_measurements[key] else '-'
         } for key in target_measurements}
 
+        adjustments = self.normalize_and_calculate_adjustments(target_measurements, test_measurements)
+        
          # Calculate differences and sort by magnitude
-        top_adjustments = dict(list(sorted(merged_measurements.items(), key=lambda item: item[1]['difference'], reverse=True))[:5])
+        top_adjustments = dict(sorted(adjustments.items(), key=lambda x: abs(x[1]['difference']), reverse=True)[:5])
+        
+        feedback_lines = [f"{key.replace('_', ' ')}: {values['adjustment']} {values['difference']}" for key, values in top_adjustments.items()]
 
-        prompt = ("Here are the adjustments to improve your pose:"
-                  + '\n'.join([f"{key.replace('_', ' ')}: {values['adjustment']} {values['difference']}"
-                               for key, values in top_adjustments.items()])
-                  + "\nWhat should I focus on? Give a single clear sentence of less than 10 words max")
+        prompt = "Here are the adjustments to improve your pose:\n" + "\n".join(feedback_lines) + "\nWhat should I focus on? Give a single clear sentence of less than 10 words max"
+
         messages = [
             {"role": "system", "content": '''You are a yoga instructor. Help the client improve their pose with clear and simple feedback.
             If an adjustment is positive (+), suggest actions like 'Lift your arms' or 'Raise your hips.'
@@ -126,45 +130,53 @@ class PoseComparison:
                 for key in relevant_keys if key in target_measurements}
 
 
-    # def calculate_accuracy(self, target_measurements, test_measurements):
-    #     try:
-    #         # Log inputs
-    #         print("Target Measurements:", target_measurements)
-    #         print("Test Measurements:", test_measurements)
+    # def calculate_accuracy(self, target_measurements, test_measurements, height):
+    #     """
+    #     Calculate the accuracy score based on normalized measurements.
+    #     Ignore the adjustment signs.
+    #     """
+    #     adjustments = self.normalize_and_calculate_adjustments(target_measurements, test_measurements, height)
+    #     total_measurements = len(adjustments)
+    #     total_error = sum(item['difference'] for item in adjustments.values())  # Use absolute differences
 
-    #         total_measurements = 0
-    #         total_error = 0.0
-
-    #         for key in target_measurements:
-    #             if key in test_measurements:
-    #                 # Log individual measurement differences
-    #                 difference = abs(target_measurements[key] - test_measurements[key])
-    #                 print(f"Difference for {key}: {difference}")
-    #                 total_measurements += 1
-    #                 total_error += difference
-
-    #         if total_measurements == 0:
-    #             print("No matching keys found between target and test measurements.")
-    #             return 0.0
-
-    #         average_error = total_error / total_measurements
-    #         print("Average Error:", average_error)
-
-    #         # Define max possible error dynamically if needed
-    #         max_possible_error = max(max(target_measurements.values(), default=0), 1.0)
-    #         print("Max Possible Error:", max_possible_error)
-
-    #         accuracy = max(0.0, 1.0 - (average_error / max_possible_error))
-    #         accuracy_percentage = accuracy * 100
-
-    #         print("Calculated Accuracy Percentage:", accuracy_percentage)
-    #         return accuracy_percentage
-
-    #     except Exception as e:
-    #         print("Exception in calculate_accuracy:", e)
+    #     if total_measurements == 0:
     #         return 0.0
+
+    #     average_error = total_error / total_measurements
+    #     accuracy = max(0.0, 1.0 - average_error)  # Accuracy ignores signs
+    #     return accuracy * 100  # Convert to percentage
     def calculate_accuracy(self, target_measurements, test_measurements):
         return 75.00
+    
+    def normalize_and_calculate_adjustments(self, target_measurements, test_measurements):
+        adjustments = {}
+
+        for key in target_measurements:
+            if key != "height":
+                if key in test_measurements:
+                    # Normalize angles (max value = 180)
+                    if 'angle' in key:
+                        target_normalized = target_measurements[key] / 180.0
+                        test_normalized = test_measurements[key] / 180.0
+                    # Normalize distances (max value = subject height)
+                    elif 'distance' in key:
+                        target_normalized = target_measurements[key] / target_measurements['height']
+                        test_normalized = test_measurements[key] / test_measurements['height']
+                    else:
+                        continue  # Skip if not angle or distance
+
+                    # Calculate adjustment sign
+                    adjustment_sign = '+' if target_normalized > test_normalized else '-'
+
+                    # Store result with normalized values and sign
+                    adjustments[key] = {
+                        'target_normalized': round(target_normalized, 3),
+                        'test_normalized': round(test_normalized, 3),
+                        'difference': round(abs(target_normalized - test_normalized), 3),
+                        'adjustment': adjustment_sign
+                    }
+                # Handle the case where key is not in test_measurements if necessary
+        return adjustments
 
     # def run(self, image):
     #     try: 
