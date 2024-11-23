@@ -1,6 +1,5 @@
 import mediapipe as mp
 import math
-import cv2
 from utils import calculate_angle
 
 class PoseDetector:
