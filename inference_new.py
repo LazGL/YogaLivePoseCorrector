@@ -8,7 +8,7 @@ import torch
 import threading
 
 class PoseComparison:
-    def __init__(self, model_name="Qwen/Qwen2.5-0.5B-Instruct", reference_image_path='Tpose_test.png', reference_tag="standing", max_new_tokens_value=35):
+    def __init__(self, reference_image_path, model_name="Qwen/Qwen2.5-0.5B-Instruct", reference_tag="standing", max_new_tokens_value=35):
 
         # Load the local LLM model
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -40,15 +40,17 @@ class PoseComparison:
         # Variables for FPS calculation
         self.prev_frame_time = 0
 
-        self.higher_accuracy_threshold = 50
+        self.higher_accuracy_threshold = 90
         self.medium_accuracy_threshold = 80
-        self.lower_accuracy_threshold = 90
+        self.lower_accuracy_threshold = 50
         
         self.frame_count = 0
         self.process_every_n_frames = 5  # Adjust 'n' as needed
         
         self.feedback_lock = threading.Lock()
         self.accuracy_score = 0.0
+        self.reference_tag = reference_tag
+        self.max_new_tokens_value = max_new_tokens_value
 
 
     def extract_landmarks(self, image):
@@ -234,6 +236,7 @@ class PoseComparison:
             
             self.feedback = []
             accuracy_score = 0.0 
+            print("1") #yesss
             
             
             self.frame_count += 1
@@ -244,6 +247,7 @@ class PoseComparison:
                     # Convert the input image to RGB
                 frame_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 results = self.pose_video.process(frame_rgb)
+                print("2") # yesss
 
                 if results.pose_landmarks:
                     # Draw landmarks on the image
@@ -256,9 +260,11 @@ class PoseComparison:
             # Convert the input image to RGB
             frame_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             results = self.pose_video.process(frame_rgb)
-
+            print("3") ## yess
+            
             if results.pose_landmarks:
                 print("Pose landmarks detected")################# debug
+                print("4")### yes 
                 # Draw landmarks on the image
                 self.mp_drawing.draw_landmarks(image, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
 
@@ -266,6 +272,7 @@ class PoseComparison:
                 user_landmarks = self.extract_landmarks(image)
                 if self.reference_landmarks is not None and user_landmarks is not None:
                     # Calculate measurements for the reference and user poses
+                    print("5") # yessss
                     target_measurements = get_all_measurements(self.reference_landmarks)
                     test_measurements = get_all_measurements(user_landmarks)
 
@@ -273,15 +280,20 @@ class PoseComparison:
                     accuracy_score = self.calculate_accuracy(target_measurements, test_measurements)
                     self.accuracy_score = accuracy_score
                     print("Calculated accuracy score:", accuracy_score) ########################debug 
+                    print("6")
 
                     # Determine feedback based on accuracy score
                     if accuracy_score < self.lower_accuracy_threshold:
                         self.feedback = ["Waiting..."] 
+                        print("7")
                     elif self.lower_accuracy_threshold <= accuracy_score < self.higher_accuracy_threshold:
                         self.feedback.append("Good enough")
+                        print("8")
                         # Generate feedback using the LLM
                         current_time = time.time()
                         if current_time - self.last_feedback_time >= self.feedback_interval:
+                        #if True:
+                            print("9")
                             print("Starting LLM feedback generation")
                             self.last_feedback_time = current_time  # Update last feedback time
                             relevant_measurements = self.get_pose_type_landmarks(target_measurements, test_measurements, self.reference_tag)
@@ -290,25 +302,31 @@ class PoseComparison:
                             threading.Thread(target=self.update_feedback_async, args=(relevant_measurements,)).start()
                         
                     else: # accuracy >= 90
+                        print("10")
                         self.feedback.append("Perfect! Hold this position.")
                         print("over 90 accuracy score")
                 else:
+                    print("11")
                     self.feedback = ["Could not detect landmarks in one or both images."]
             else:
+                print("12")
                 print("No pose landmarks detected")
                 self.feedback.append("No pose detected. Please adjust your position.")
 
             self.accuracy_score = accuracy_score######################### what is the use ? trying to debug 
             print("Returning from run method")
+            print("13")
             # Return the processed image, feedback, accuracy score, and timer status
             return image, self.feedback, round(self.accuracy_score, 2)
         except Exception as e:
             print("Exception in run:", e)
+            print("14")
             return image, self.feedback, round(self.accuracy_score, 2)
     
     # Add this new method to handle asynchronous feedback generation
     def update_feedback_async(self, relevant_measurements):
         try:
+            print("15")
             print("Started LLM feedback generation thread")
             llm_output = self.generate_feedback(
                 {k: v[0] for k, v in relevant_measurements.items()},  # Target

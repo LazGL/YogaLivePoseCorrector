@@ -129,7 +129,7 @@ with gr.Blocks(css=css) as demo:
                     )
 
     # Timer for feedback updates
-    feedback_timer = gr.Timer(value=3)  # Ticks every 3 seconds
+    feedback_timer = gr.Timer(value=1)  # Ticks every 3 seconds
     feedback_timer.tick(fn=update_feedback, outputs=[feedback_output, audio_output, accuracy_output])
 
 if __name__ == "__main__":
