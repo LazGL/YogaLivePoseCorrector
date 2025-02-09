@@ -11,6 +11,8 @@ Personal Yoga Coach is a cutting-edge application powered by AI, designed to pro
 - **Voice and Visual Guidance**: Includes voice instructions and on-screen visuals for each pose.
 
 ---
+![Uploading image.png…]()
+
 
 ## Installation
 
