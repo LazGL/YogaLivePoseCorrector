@@ -118,7 +118,7 @@ We welcome contributions to enhance Personal Yoga Coach! If you'd like to contri
 
 ## 📜 License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the cc-by-nc License. See the [LICENSE](LICENSE) file for more details.
 
 ---
 
