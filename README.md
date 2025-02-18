@@ -115,10 +115,13 @@ We welcome contributions to enhance Personal Yoga Coach! If you'd like to contri
 5. Open a pull request.
 
 ---
-
 ## 📜 License
 
-This project is licensed under the cc-by-nc License. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under **Apache 2.0**, allowing modification and redistribution, as long as proper credit is given to the original author.
+
+🚨 **Additional Restriction**: This code **may not be used for commercial purposes without permission**, as detailed in [`NON-COMMERCIAL.md`](NON-COMMERCIAL.md).
+
+Any improvements based on this code must give proper credit to the original author.
 
 ---
 
