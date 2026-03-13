@@ -2,61 +2,75 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
+import logging
 from calculate_difference import get_all_measurements
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import threading
-from sklearn.metrics import accuracy_score
+
+logger = logging.getLogger(__name__)
 
 class PoseComparison:
-    def __init__(self, reference_image_path, model_name="Qwen/Qwen2.5-0.5B-Instruct", reference_tag="standing", max_new_tokens_value=35):
+    def __init__(self, reference_image_path, model_name="Qwen/Qwen2.5-0.5B-Instruct",
+                 reference_tag="standing", max_new_tokens_value=35, device=None):
+
+        # Detect compute device
+        if device is None:
+            if torch.backends.mps.is_available():
+                device = "mps"
+            elif torch.cuda.is_available():
+                device = "cuda"
+            else:
+                device = "cpu"
 
         # Load the local LLM model
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16
-        ).eval().to("mps")
+            torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+        ).eval().to(device)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         # Initialize MediaPipe Pose
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5)
-        self.pose_video = self.mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        self.pose_video = self.mp_pose.Pose(
+            static_image_mode=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
         self.mp_drawing = mp.solutions.drawing_utils
 
         # Load and process the reference image
         self.reference_landmarks = self.extract_landmarks(cv2.imread(reference_image_path))
         if self.reference_landmarks is None:
-            raise FileNotFoundError("The reference image could not be loaded or no pose detected.")
-
-        # Initialize OpenCV for video capture
-        self.cap = cv2.VideoCapture(0)
+            raise FileNotFoundError(
+                f"Reference image could not be loaded or no pose detected: {reference_image_path}"
+            )
 
         self.feedback_text = ""
-        
-        # Initialize timing variables
+
+        # Timing
         self.last_feedback_time = 0
-        self.feedback_interval = 2 # Feedback every 3 seconds
+        self.feedback_interval = 2  # seconds between feedback updates
 
-        # Variables for FPS calculation
-        self.prev_frame_time = 0
-
+        # Accuracy thresholds
         self.higher_accuracy_threshold = 80
         self.lower_accuracy_threshold = 60
-        
+
+        # Frame processing
         self.frame_count = 0
-        self.process_every_n_frames = 2  # Adjust 'n' as needed
-        
+        self.process_every_n_frames = 2
+
+        # Thread safety
         self.feedback_lock = threading.Lock()
-        self.accuracy_score = 0.0
-        self.reference_tag = reference_tag
-        self.max_new_tokens_value = max_new_tokens_value
-        
         self.is_generating_feedback = False
 
+        self.accuracy_score = 0.0
+        self._accuracy_lock = threading.Lock()  # Guards accuracy_score reads/writes
+        self.reference_tag = reference_tag
+        self.max_new_tokens_value = max_new_tokens_value
         self.stored_height = 170
         
-    ##########
     def overlay_skeletons(self, target_landmarks, user_landmarks, image):
       """
       Overlays the target skeleton on top of the user's skeleton on the given image.
@@ -135,8 +149,6 @@ class PoseComparison:
       combined_image = cv2.addWeighted(user_image, 1.0, target_image, 1.0, 0)
 
       return combined_image
-  #########
-
 
     def extract_landmarks(self, image):
         if image is None:
@@ -149,17 +161,11 @@ class PoseComparison:
         return None
 
     def generate_feedback(self, target_measurements, test_measurements, max_new_tokens_value):
-        
-        print("FEEDBACK GENERATED CALLED ______________________________________________________________")
-
-
         adjustments = self.normalize_and_calculate_adjustments(target_measurements, test_measurements)
-        print("_____ __ _____ __ ________", adjustments)
-         # Calculate differences and sort by magnitude
+        # Calculate differences and sort by magnitude
         top_adjustments = dict(sorted(adjustments.items(), key=lambda x: abs(x[1]['difference']), reverse=True)[:5])
-        
+
         feedback_lines = [f"{key.replace('_', ' ')}: {values['adjustment']} {values['difference']}" for key, values in top_adjustments.items()]
-        print("adjustments", adjustments)
         prompt = "Here are the adjustments to improve your pose:\n" + "\n".join(feedback_lines) + "\nWhat should I focus on? Give ONE single clear ORDER of less than 10 words max. do not say Focus on maintaining balance and alignment."
 
         messages = [
@@ -169,7 +175,6 @@ If an adjustment is negative (-), suggest actions like 'Lower your hips' or 'Rel
 Do not use numbers and focus on a SINGLE clear helpful instruction, the instruction with the HIGHEST PRIORITY per adjustment.'''},
             {"role": "user", "content": prompt}
         ]
-        print(prompt)
         text = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
@@ -197,7 +202,7 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                 'right_elbow_angle', 'left_elbow_angle',
                 'shoulder_alignment', 'head_neck_alignment', 'angle_between_legs', 'right_hands_height',
                 'left_hand_height', 'hips_in_between_feet', 'stance_width_distance', 'right_foot_distance_from_ground',
-                'left_foot_distance_from_ground', 'distance_bestween_feet'
+                'left_foot_distance_from_ground', 'distance_between_feet'
             ]
         elif tag == 'ground':
             relevant_keys = [
@@ -205,7 +210,7 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                 'hand_foot_distance', 'core_engagement',
                 'spine_vertical', 'symmetry', 'leg_engagement',
                 'hip_distance_from_ground', 'hips_in_between_feet', 'right_foot_distance_from_ground',
-                'left_foot_distance_from_ground', 'distance_bestween_feet'
+                'left_foot_distance_from_ground', 'distance_between_feet'
             ]
         else:
             relevant_keys = target_measurements.keys()
@@ -217,87 +222,19 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
     def calculate_accuracy(self, target_measurements, test_measurements, height):
         """
         Calculate the accuracy score based on normalized measurements.
-        Ignore the adjustment signs.
+        Returns a percentage 0-100 where 100 is a perfect match.
         """
         adjustments = self.normalize_and_calculate_adjustments(target_measurements, test_measurements)
-        print("________________________________________________")
-        #print(adjustments)
         total_measurements = len(adjustments)
-        total_error = sum(abs(item['difference']) for item in adjustments.values())  # Use absolute differences
+        total_error = sum(abs(item['difference']) for item in adjustments.values())
 
         if total_measurements == 0:
-            print("TOTAL MEASUSRLENT = 0")
             return 0.0
 
         average_error = total_error / total_measurements
-        print("REAL RSULT ACCURACY :",  1.0 - average_error)
-        accuracy = max(0.0, 1.0 - average_error)  # Accuracy ignores signs
-        return accuracy * 100  # Convert to percentage
-    # def calculate_accuracy(self, target_measurements, test_measurements):
-    #     return 75.00
-    
-    # def calculate_accuracy(self, target_landmarks, test_landmarks):
-        
-    #     return accuracy_score(list(target_landmarks.values()), list(test_landmarks.values())) * 100
-    
-    # def normalize_and_calculate_adjustments(self, target_measurements, test_measurements):
-    #     adjustments = {}
+        accuracy = max(0.0, 1.0 - average_error)
+        return accuracy * 100
 
-    #     # Store height for future use
-    #     if target_measurements.get('height') is None:
-    #         return adjustments  # Return nothing if height is None
-    #     else:
-    #         self.stored_height = target_measurements['height']  # Store height for future use
-
-    #     for key in target_measurements:
-    #         if key != "height":
-    #             if key in test_measurements:
-    #                 # Normalize angles (max value = 180)
-    #                 if 'angle' in key:
-    #                     target_normalized = target_measurements[key] / 180.0 * 100
-    #                     test_normalized = test_measurements[key] / 180.0 *100
-    #                 # Normalize distances (max value = subject height)
-    #                 elif 'distance' in key:
-    #                     target_normalized = target_measurements[key] / self.stored_height * 100
-    #                     test_normalized = test_measurements[key] / self.stored_height * 100
-    #                 else:
-    #                     continue  # Skip if not angle or distance
-
-    #                 invert_sign_measurements = [
-    #                     'right_knee_over_toes',
-    #                     'left_knee_over_toes',
-    #                     'right_knee_ankle_alignment',
-    #                     'left_knee_ankle_alignment',
-    #                     'hip_square',
-    #                     'shoulder_alignment',
-    #                     'spine_vertical',
-    #                     'pelvis_tilt',
-    #                     'head_neck_alignment',
-    #                     'hip_shoulder_alignment',
-    #                     'hips_in_between_feet'
-    #                     ]
-
-    #                 # Calculate adjustment sign with inversion where needed
-    #                 if key in invert_sign_measurements:
-    #                     adjustment_sign = '-' if target_normalized > test_normalized else '+'
-    #                 else:
-    #                     adjustment_sign = '+' if target_normalized > test_normalized else '-'
-                        
-    #                 #print(key, adjustment_sign, target_normalized, test_normalized)
-
-
-    #                 # Store result with normalized values and sign
-    #                 adjustments[key] = {
-    #                     'target_normalized': int(target_normalized),
-    #                     'test_normalized': int(test_normalized),
-    #                     'difference': int(abs(target_normalized - test_normalized)),
-    #                     'adjustment': adjustment_sign
-    #                 }
-    #                 print(f"Processed {key}: {adjustments[key]}")
-                    
-    #                 #print(adjustments)
-    #             # Handle the case where key is not in test_measurements if necessary
-    #     return adjustments
     def normalize_and_calculate_adjustments(self, target_measurements, test_measurements):
         adjustments = {}
 
@@ -319,10 +256,7 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                         target_normalized = target_measurements[key] / self.stored_height * 100
                         test_normalized = test_measurements[key] / self.stored_height * 100
                     else:
-                        # For other measurement types, define appropriate normalization
-                        # For now, you can skip or handle as needed
-                        print(f"Skipping unsupported measurement type: {key}")
-                        continue  # Skip unsupported measurement types
+                            continue  # Skip unsupported measurement types
 
                     invert_sign_measurements = [
                         'right_knee_over_toes',
@@ -351,73 +285,113 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                         'difference': int(abs(target_normalized - test_normalized)),
                         'adjustment': adjustment_sign
                     }
-                    #print(f"Processed {key}: {adjustments[key]}")
                 else:
-                    print(f"Key {key} not found in test measurements. Skipping.")
-            else:
-                print("Skipping height key.")
+                    logger.debug("Key %s not found in test measurements", key)
 
         return adjustments
 
 
     def run(self, image):
+        """
+        Process a single frame (already RGB from app_llm).
+        Returns (annotated_image, accuracy_score).
+        """
         try:
             self.frame_count += 1
+
+            # image is already RGB (converted in app_llm.py) — feed directly to MediaPipe
+            results = self.pose_video.process(image)
+
             if self.frame_count % self.process_every_n_frames != 0:
-                # Skip processing to reduce load
-                frame_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                results = self.pose_video.process(frame_rgb)
+                # Lightweight frame: just draw skeleton, reuse last accuracy
                 if results.pose_landmarks:
                     self.mp_drawing.draw_landmarks(image, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
-                return image, round(self.accuracy_score, 2)
+                with self._accuracy_lock:
+                    score = self.accuracy_score
+                return image, round(score, 2)
 
-            frame_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            results = self.pose_video.process(frame_rgb)
+            # Full analysis frame
             if results.pose_landmarks:
-                self.mp_drawing.draw_landmarks(image, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
-                user_landmarks = self.extract_landmarks(image)
-                if self.reference_landmarks is not None and user_landmarks is not None:
+                user_landmarks_raw = np.array([
+                    [lm.x, lm.y, lm.z] for lm in results.pose_landmarks.landmark
+                ])
+
+                if self.reference_landmarks is not None and user_landmarks_raw is not None:
                     target_measurements = get_all_measurements(self.reference_landmarks)
-                    test_measurements = get_all_measurements(user_landmarks)
-                    accuracy_score = self.calculate_accuracy(target_measurements, test_measurements, self.stored_height)
-                    print("Accuracy:", accuracy_score)
-                    self.accuracy_score = accuracy_score
+                    test_measurements = get_all_measurements(user_landmarks_raw)
+                    accuracy_score = self.calculate_accuracy(
+                        target_measurements, test_measurements, self.stored_height
+                    )
+                    with self._accuracy_lock:
+                        self.accuracy_score = accuracy_score
 
+                    # Overlay both skeletons (target in blue, user in green)
+                    image = self.overlay_skeletons(
+                        list(results.pose_landmarks.landmark),   # target ref (will be aligned)
+                        list(results.pose_landmarks.landmark),
+                        image,
+                    )
+                    # Draw reference skeleton overlay when accuracy needs work
+                    if accuracy_score < self.higher_accuracy_threshold:
+                        try:
+                            # Build pseudo-landmarks from reference numpy array
+                            ref_landmarks = [
+                                mp.framework.formats.landmark_pb2.NormalizedLandmark(
+                                    x=float(pt[0]), y=float(pt[1]), z=float(pt[2])
+                                )
+                                for pt in self.reference_landmarks
+                            ]
+                            image = self.overlay_skeletons(
+                                ref_landmarks,
+                                list(results.pose_landmarks.landmark),
+                                image,
+                            )
+                        except Exception as e:
+                            logger.debug("Overlay fallback: %s", e)
+                            self.mp_drawing.draw_landmarks(
+                                image, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS
+                            )
+                    else:
+                        self.mp_drawing.draw_landmarks(
+                            image, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS
+                        )
+
+                    # Generate LLM feedback when accuracy is mid-range
                     if accuracy_score < self.lower_accuracy_threshold:
-                        #self.feedback_text = "Waiting..."
-                        None
-                        print("1")
-                    elif self.lower_accuracy_threshold <= accuracy_score < self.higher_accuracy_threshold:
+                        pass  # Too far off — no useful feedback
+                    elif accuracy_score < self.higher_accuracy_threshold:
                         current_time = time.time()
-                        print("2")
-                        if (current_time - self.last_feedback_time >= self.feedback_interval):
-                            #self.last_feedback_time = current_time
-                            print("3")
-                            self.is_generating_feedback = True  # Set flag to prevent multiple threads
-                            #self.feedback_text = "Generating feedback..."
-                            relevant_measurements = self.get_pose_type_landmarks(target_measurements, test_measurements, self.reference_tag)
-                            threading.Thread(target=self.update_feedback_async, args=(relevant_measurements,)).start()
+                        if current_time - self.last_feedback_time >= self.feedback_interval:
+                            self.is_generating_feedback = True
+                            relevant = self.get_pose_type_landmarks(
+                                target_measurements, test_measurements, self.reference_tag
+                            )
+                            threading.Thread(
+                                target=self.update_feedback_async, args=(relevant,), daemon=True
+                            ).start()
                             self.last_feedback_time = current_time
-                        else:
-                            # Do not overwrite self.feedback_text here
-                            pass
-                    else:  # accuracy >= self.higher_accuracy_threshold
-                        self.feedback_text = "Perfect! Hold this position."
+                    else:
+                        with self.feedback_lock:
+                            self.feedback_text = "Perfect! Hold this position."
                 else:
-                    #self.feedback_text = "Could not detect landmarks."
-                    None
+                    self.mp_drawing.draw_landmarks(
+                        image, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS
+                    )
             else:
-                self.feedback_text = "No pose detected. Please adjust your position."
+                with self.feedback_lock:
+                    self.feedback_text = "No pose detected. Please adjust your position."
 
-            return image, round(self.accuracy_score, 2)
+            with self._accuracy_lock:
+                score = self.accuracy_score
+            return image, round(score, 2)
         except Exception as e:
-            print("Exception in run:", e)
-            return image, round(self.accuracy_score, 2)
-    
-    # Add this new method to handle asynchronous feedback generation
+            logger.error("Exception in run: %s", e)
+            with self._accuracy_lock:
+                score = self.accuracy_score
+            return image, round(score, 2)
+
     def update_feedback_async(self, relevant_measurements):
         try:
-            print("Started LLM feedback generation thread")
             llm_output = self.generate_feedback(
                 {k: v[0] for k, v in relevant_measurements.items()},
                 {k: v[1] for k, v in relevant_measurements.items()},
@@ -425,10 +399,9 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
             )
             with self.feedback_lock:
                 self.feedback_text = llm_output
-            print("LLM feedback generated:", llm_output)
+            logger.debug("LLM feedback: %s", llm_output)
         except Exception as e:
-            print("Exception in update_feedback_async:", e)
+            logger.error("Exception in update_feedback_async: %s", e)
         finally:
-            self.is_generating_feedback = False  # Reset the flag
-    
+            self.is_generating_feedback = False
 

@@ -323,7 +323,12 @@ def calculate_height_of_feet_left(landmarks: np.ndarray) -> float:
     return left_foot_height
 
 def get_all_measurements(landmarks: np.ndarray) -> Dict[str, float]:
-  """Get all measurements in one function"""
+  """Get all measurements in one function. Cached sub-calls to avoid redundant computation."""
+  # Pre-compute composite results once
+  body_pos = check_body_position(landmarks)
+  engagement = check_engagement(landmarks)
+  stance_w = check_stance_width(landmarks)
+
   measurements = {
       'right_knee_bend': check_knee_bend(landmarks, 'right'),
       'left_knee_bend': check_knee_bend(landmarks, 'left'),
@@ -331,7 +336,7 @@ def get_all_measurements(landmarks: np.ndarray) -> Dict[str, float]:
       'left_knee_ankle_alignment': check_knee_ankle_alignment(landmarks, 'left'),
       'back_arch': check_back_arch(landmarks),
       'tailbone_tilt': check_tailbone_tilt(landmarks),
-      'stance_width': check_stance_width(landmarks),
+      'stance_width': stance_w,
       'hip_square': check_hip_square(landmarks),
       'shoulder_alignment': check_shoulder_alignment(landmarks),
       'weight_distribution': check_weight_distribution(landmarks),
@@ -343,22 +348,21 @@ def get_all_measurements(landmarks: np.ndarray) -> Dict[str, float]:
       'left_elbow_angle': check_joint_angle(landmarks, 'left_elbow'),
       'head_neck_alignment': check_alignment(landmarks, 'head_neck'),
       'hip_shoulder_alignment': check_alignment(landmarks, 'hip_shoulder'),
-      'hand_foot_distance': check_body_position(landmarks)['hand_foot_distance'],
-      'hip_height': check_body_position(landmarks)['hip_height'],
+      'hand_foot_distance': body_pos['hand_foot_distance'],
+      'hip_height': body_pos['hip_height'],
       'symmetry': check_symmetry(landmarks),
-      'core_engagement': check_engagement(landmarks)['core_engagement'],
-      'leg_engagement': check_engagement(landmarks)['leg_engagement'],
-      'height' : calculate_subject_height(landmarks),
-      
+      'core_engagement': engagement['core_engagement'],
+      'leg_engagement': engagement['leg_engagement'],
+      'height': calculate_subject_height(landmarks),
       'angle_between_legs': calculate_angle_between_legs(landmarks),
-      'right_hand_height': right_calculate_height_of_hand(landmarks),
+      'right_hands_height': right_calculate_height_of_hand(landmarks),
       'left_hand_height': left_calculate_height_of_hand(landmarks),
       'hip_distance_from_ground': calculate_height_of_hips(landmarks),
       'hips_in_between_feet': check_center_of_gravity_in_between_ankles(landmarks),
-      'stance_width_distance': check_stance_width(landmarks),
+      'stance_width_distance': stance_w,  # Same as stance_width (ankle distance)
       'right_foot_distance_from_ground': calculate_height_of_feet_right(landmarks),
       'left_foot_distance_from_ground': calculate_height_of_feet_left(landmarks),
-      'distance_bestween_feet': calculate_distance_between_feet(landmarks)
+      'distance_between_feet': calculate_distance_between_feet(landmarks),
   }
   return measurements
 

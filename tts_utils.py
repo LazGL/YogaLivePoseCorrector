@@ -1,22 +1,41 @@
-# tts_utils.py
+"""
+Text-to-speech utilities for NamastAI.
+Converts feedback and voice cues to audio files for playback.
+"""
 
-from gtts import gTTS
-import tempfile
+import logging
 import os
+import tempfile
+from gtts import gTTS
 
-temp_file_path = None  # Global variable to store the temp file path
+logger = logging.getLogger(__name__)
+
+_temp_file_path = None
+
 
 def text_to_speech(text):
     """
     Convert text to speech and return the path to the audio file.
+    Returns None if TTS fails (allows the app to continue without audio).
     """
-    global temp_file_path
-    tts = gTTS(text)
-    # Remove the previous temp file if it exists
-    if temp_file_path and os.path.exists(temp_file_path):
-        os.remove(temp_file_path)
-    # Save to a new temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-        tts.save(fp.name)
-        temp_file_path = fp.name
-    return temp_file_path
+    global _temp_file_path
+
+    if not text or not text.strip():
+        return None
+
+    try:
+        tts = gTTS(text)
+        # Clean up previous temp file
+        if _temp_file_path and os.path.exists(_temp_file_path):
+            try:
+                os.remove(_temp_file_path)
+            except OSError:
+                pass
+        # Save to a new temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+            tts.save(fp.name)
+            _temp_file_path = fp.name
+        return _temp_file_path
+    except Exception as e:
+        logger.error("TTS failed: %s", e)
+        return None
