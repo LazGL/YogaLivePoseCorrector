@@ -46,7 +46,8 @@ _INVERT_SIGN_KEYS = frozenset([
 
 class PoseComparison:
     def __init__(self, reference_image_path, model_name="Qwen/Qwen2.5-0.5B-Instruct",
-                 reference_tag="standing", max_new_tokens_value=35, device=None):
+                 reference_tag="standing", max_new_tokens_value=35, device=None,
+                 preloaded_model=None, preloaded_tokenizer=None):
 
         # Detect compute device
         if device is None:
@@ -57,12 +58,16 @@ class PoseComparison:
             else:
                 device = "cpu"
 
-        # Load the local LLM model
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            dtype=torch.bfloat16 if device != "cpu" else torch.float32,
-        ).eval().to(device)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # Reuse pre-loaded model if provided, otherwise load from scratch
+        if preloaded_model is not None and preloaded_tokenizer is not None:
+            self.model = preloaded_model
+            self.tokenizer = preloaded_tokenizer
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+            ).eval().to(device)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         # Initialize MediaPipe Pose
         self.mp_pose = _mp_pose_module
@@ -82,6 +87,24 @@ class PoseComparison:
             )
 
         self.feedback_text = ""
+
+    def switch_reference(self, reference_image_path: str, reference_tag: str = "standing"):
+        """Switch to a different pose reference without reloading the LLM."""
+        new_landmarks = self.extract_landmarks(cv2.imread(reference_image_path))
+        if new_landmarks is None:
+            raise FileNotFoundError(
+                f"Reference image could not be loaded or no pose detected: {reference_image_path}"
+            )
+        self.reference_landmarks = new_landmarks
+        self.reference_tag = reference_tag
+        # Reset state for new pose
+        with self.feedback_lock:
+            self.feedback_text = ""
+        with self._accuracy_lock:
+            self.accuracy_score = 0.0
+        self.last_feedback_time = 0
+        self._feedback_thread = None
+        logger.info("Switched reference to %s (tag=%s)", reference_image_path, reference_tag)
 
         # Timing
         self.last_feedback_time = 0

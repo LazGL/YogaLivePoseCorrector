@@ -28,6 +28,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from inference_new import PoseComparison
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
 from workout_engine import WorkoutEngine, WorkoutState
 from tts_utils import text_to_speech
 from session_tracker import save_session, load_history
@@ -39,7 +41,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
+
+# LLM loaded once at startup and shared across all PoseComparison instances
+_llm_model = None
+_llm_tokenizer = None
+
+
+def _load_llm():
+    """Load the LLM and tokenizer once at server startup."""
+    global _llm_model, _llm_tokenizer
+    if torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    logger.info("Loading LLM %s on %s ...", MODEL_NAME, device)
+    _llm_model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+    ).eval().to(device)
+    _llm_tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    logger.info("LLM ready.")
+
+
 app = FastAPI(title="NamastAI")
+
+@app.on_event("startup")
+def startup_event():
+    """Pre-load the LLM at startup so the first pose selection is instant."""
+    threading.Thread(target=_load_llm, daemon=True).start()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -99,24 +132,29 @@ state = _AppState()
 
 def _ensure_detector(reference_image_path: str, reference_tag: str = "standing") -> bool:
     with state._detector_lock:
-        if (
-            state.pose_detector is None
-            or getattr(state.pose_detector, "_ref_path", None) != reference_image_path
-        ):
-            if not os.path.exists(reference_image_path):
-                logger.warning("Reference image not found: %s", reference_image_path)
-                return False
-            try:
-                logger.info("Loading pose detector for %s ...", reference_image_path)
+        if not os.path.exists(reference_image_path):
+            logger.warning("Reference image not found: %s", reference_image_path)
+            return False
+
+        try:
+            if state.pose_detector is None:
+                # First time: create detector (LLM injected if already loaded)
+                logger.info("Creating pose detector with reference %s ...", reference_image_path)
                 state.pose_detector = PoseComparison(
                     reference_image_path=reference_image_path,
                     reference_tag=reference_tag,
+                    preloaded_model=_llm_model,
+                    preloaded_tokenizer=_llm_tokenizer,
                 )
                 state.pose_detector._ref_path = reference_image_path
                 logger.info("Detector ready (tag=%s)", reference_tag)
-            except Exception as e:
-                logger.error("Failed to load pose detector: %s", e)
-                return False
+            elif getattr(state.pose_detector, "_ref_path", None) != reference_image_path:
+                # Pose changed: just swap the reference image, keep the LLM
+                state.pose_detector.switch_reference(reference_image_path, reference_tag)
+                state.pose_detector._ref_path = reference_image_path
+        except Exception as e:
+            logger.error("Failed to load pose detector: %s", e)
+            return False
     return True
 
 
