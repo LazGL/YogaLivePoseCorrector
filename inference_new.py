@@ -8,6 +8,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import threading
 
+# MediaPipe: use direct imports for compatibility with mp 0.10+
+# (mp.solutions was removed in newer versions)
+from mediapipe.python.solutions import pose as _mp_pose_module
+from mediapipe.python.solutions import drawing_utils as _mp_drawing_module
+from mediapipe.framework.formats import landmark_pb2
+
 logger = logging.getLogger(__name__)
 
 # Pre-computed key sets for O(1) lookup in normalize_and_calculate_adjustments()
@@ -54,19 +60,19 @@ class PoseComparison:
         # Load the local LLM model
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16 if device != "cpu" else torch.float32,
+            dtype=torch.bfloat16 if device != "cpu" else torch.float32,
         ).eval().to(device)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         # Initialize MediaPipe Pose
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5)
-        self.pose_video = self.mp_pose.Pose(
+        self.mp_pose = _mp_pose_module
+        self.pose = _mp_pose_module.Pose(static_image_mode=True, min_detection_confidence=0.5)
+        self.pose_video = _mp_pose_module.Pose(
             static_image_mode=False,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5,
         )
-        self.mp_drawing = mp.solutions.drawing_utils
+        self.mp_drawing = _mp_drawing_module
 
         # Load and process the reference image
         self.reference_landmarks = self.extract_landmarks(cv2.imread(reference_image_path))
@@ -148,7 +154,7 @@ class PoseComparison:
       user_image = image.copy()
       self.mp_drawing.draw_landmarks(
           user_image,
-          mp.framework.formats.landmark_pb2.LandmarkList(landmark=user_landmarks),
+          landmark_pb2.LandmarkList(landmark=user_landmarks),
           self.mp_pose.POSE_CONNECTIONS
       )
 
@@ -161,7 +167,7 @@ class PoseComparison:
       aligned_target_landmarks = []
       for idx, coord in enumerate(aligned_target_coords):
           x_pixel, y_pixel = coord
-          normalized_landmark = mp.framework.formats.landmark_pb2.NormalizedLandmark(
+          normalized_landmark = landmark_pb2.NormalizedLandmark(
               x=float(x_pixel) / image_width,
               y=float(y_pixel) / image_height,
               z=target_landmarks[idx].z  # Use z if depth is relevant
@@ -170,7 +176,7 @@ class PoseComparison:
 
       self.mp_drawing.draw_landmarks(
           target_image,
-          mp.framework.formats.landmark_pb2.LandmarkList(landmark=aligned_target_landmarks),
+          landmark_pb2.LandmarkList(landmark=aligned_target_landmarks),
           self.mp_pose.POSE_CONNECTIONS,
           landmark_drawing_spec=target_landmark_style,
           connection_drawing_spec=target_connection_style
@@ -347,7 +353,7 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                     if accuracy_score < self.higher_accuracy_threshold:
                         try:
                             ref_landmarks = [
-                                mp.framework.formats.landmark_pb2.NormalizedLandmark(
+                                landmark_pb2.NormalizedLandmark(
                                     x=float(pt[0]), y=float(pt[1]), z=float(pt[2])
                                 )
                                 for pt in self.reference_landmarks
