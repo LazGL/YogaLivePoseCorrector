@@ -8,11 +8,27 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import threading
 
-# MediaPipe: use direct imports for compatibility with mp 0.10+
-# (mp.solutions was removed in newer versions)
-from mediapipe.python.solutions import pose as _mp_pose_module
-from mediapipe.python.solutions import drawing_utils as _mp_drawing_module
-from mediapipe.framework.formats import landmark_pb2
+# MediaPipe: try multiple import paths across versions
+# v0.9 and earlier:  mp.solutions.pose  (attribute on the package)
+# v0.10.x:           mediapipe.python.solutions.pose
+# v0.10.14+/0.11+:   mediapipe.solutions.pose  (flat, no python/ subpackage)
+try:
+    from mediapipe.python.solutions import pose as _mp_pose_module
+    from mediapipe.python.solutions import drawing_utils as _mp_drawing_module
+except (ImportError, ModuleNotFoundError):
+    try:
+        from mediapipe.solutions import pose as _mp_pose_module          # type: ignore
+        from mediapipe.solutions import drawing_utils as _mp_drawing_module  # type: ignore
+    except (ImportError, ModuleNotFoundError):
+        import mediapipe as _mp_pkg
+        _mp_pose_module = _mp_pkg.solutions.pose          # type: ignore
+        _mp_drawing_module = _mp_pkg.solutions.drawing_utils  # type: ignore
+
+try:
+    from mediapipe.framework.formats import landmark_pb2
+except (ImportError, ModuleNotFoundError):
+    from google.protobuf import descriptor as _  # ensure protobuf available
+    import mediapipe.framework.formats.landmark_pb2 as landmark_pb2  # type: ignore
 
 logger = logging.getLogger(__name__)
 
