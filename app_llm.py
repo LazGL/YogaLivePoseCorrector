@@ -15,6 +15,7 @@ from tts_utils import text_to_speech
 from css_style import css
 from pose_config import POSES, ROUTINES, ACCURACY_PERFECT, ACCURACY_FEEDBACK
 from workout_engine import WorkoutEngine, WorkoutState
+from session_tracker import save_session, format_history_html
 import threading
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -26,6 +27,14 @@ logger = logging.getLogger(__name__)
 pose_detector = None          # Initialized when user starts a session
 workout = WorkoutEngine()
 last_voice_text = None        # Track last voiced feedback to avoid replaying
+
+# Correction-repeat tracking: re-voice feedback if accuracy doesn't improve
+_last_feedback_accuracy = None   # Accuracy when feedback was last voiced
+_stagnant_cycles = 0             # Consecutive cycles with no accuracy improvement
+_STAGNANT_THRESHOLD = 2          # Re-voice after this many stagnant cycles
+
+# Session persistence tracking
+_last_workout_state = None       # Detect COMPLETE transition to auto-save
 
 # We lazily initialize pose_detector because we need a reference image first
 _detector_lock = threading.Lock()
@@ -40,12 +49,16 @@ def _ensure_detector(reference_image_path, reference_tag="standing"):
                 logger.warning("Reference image not found: %s", reference_image_path)
                 return False
             try:
+                logger.info("Loading pose detector (this may take a moment)...")
                 pose_detector = PoseComparison(
                     reference_image_path=reference_image_path,
                     reference_tag=reference_tag,
                 )
                 pose_detector._ref_path = reference_image_path
                 logger.info("Loaded reference: %s (tag=%s)", reference_image_path, reference_tag)
+            except FileNotFoundError as e:
+                logger.error("Reference image missing: %s", e)
+                return False
             except Exception as e:
                 logger.error("Failed to load pose detector: %s", e)
                 return False
@@ -64,8 +77,8 @@ def detect_pose(image):
         return image
 
     try:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        annotated_image, accuracy_score = pose_detector.run(image)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        annotated_image, accuracy_score = pose_detector.run(image_rgb)
 
         body_visible = accuracy_score > 0
 
@@ -77,6 +90,9 @@ def detect_pose(image):
                 _ensure_detector(pose_cfg["reference_image"], pose_cfg.get("tag", "standing"))
 
         return cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR)
+    except cv2.error as e:
+        logger.error("OpenCV error in detect_pose: %s", e)
+        return image
     except Exception as e:
         logger.error("Exception in detect_pose: %s", e)
         return image
@@ -88,7 +104,7 @@ def detect_pose(image):
 
 def update_feedback():
     """Called every few seconds by gr.Timer — returns HTML feedback, audio, accuracy, status, pictograms."""
-    global last_voice_text
+    global last_voice_text, _last_feedback_accuracy, _stagnant_cycles, _last_workout_state
 
     if pose_detector is None:
         return _feedback_html("Select a mode to begin"), None, _accuracy_html(0), "Ready", _pictograms_html(None, [])
@@ -103,6 +119,21 @@ def update_feedback():
     voice_cues = workout.pop_voice_cues()
     status_text = workout.get_status_text()
 
+    # --- Correction-repeat logic ---
+    # If accuracy hasn't improved for _STAGNANT_THRESHOLD cycles, re-voice the feedback.
+    if accuracy > 0 and accuracy < ACCURACY_PERFECT:
+        if _last_feedback_accuracy is not None and accuracy <= _last_feedback_accuracy + 2:
+            _stagnant_cycles += 1
+        else:
+            _stagnant_cycles = 0
+        _last_feedback_accuracy = accuracy
+        if _stagnant_cycles >= _STAGNANT_THRESHOLD:
+            last_voice_text = None   # Allow re-voicing
+            _stagnant_cycles = 0
+    else:
+        _stagnant_cycles = 0
+        _last_feedback_accuracy = accuracy
+
     # Determine what to speak
     audio_data = None
     if voice_cues:
@@ -112,6 +143,13 @@ def update_feedback():
     elif feedback_text and feedback_text != last_voice_text and feedback_text.strip():
         audio_data = text_to_speech(feedback_text)
         last_voice_text = feedback_text
+
+    # Auto-save session when workout reaches COMPLETE for the first time
+    if workout.state == WorkoutState.COMPLETE and _last_workout_state != WorkoutState.COMPLETE:
+        if workout.results:
+            routine_name = ROUTINES.get(workout.routine_key, {}).get("name") if workout.routine_key else None
+            save_session(routine_name, workout.results)
+    _last_workout_state = workout.state
 
     # Build pictogram state
     completed_poses = [r["pose"] for r in workout.results] if workout.results else []
@@ -305,6 +343,12 @@ def build_ui():
                     value=_pictograms_html(None, []),
                     elem_id="pictogram-container",
                 )
+
+        # Session history (below mode panel)
+        with gr.Accordion("Session History", open=False, elem_id="history-panel"):
+            history_output = gr.HTML(value=format_history_html())
+            refresh_btn = gr.Button("Refresh History", size="sm", variant="secondary")
+            refresh_btn.click(fn=format_history_html, outputs=[history_output])
 
         # Timer for feedback/status updates
         feedback_timer = gr.Timer(value=3)

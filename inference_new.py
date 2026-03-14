@@ -390,6 +390,28 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                 score = self.accuracy_score
             return image, round(score, 2)
 
+    def _rule_based_feedback(self, relevant_measurements):
+        """
+        Fallback feedback when the LLM is unavailable.
+        Picks the measurement with the largest difference and returns a simple instruction.
+        """
+        best_key = None
+        best_diff = 0
+        best_sign = "+"
+        for key, values in relevant_measurements.items():
+            diff = abs(values[0] - values[1]) if len(values) >= 2 else 0
+            if diff > best_diff:
+                best_diff = diff
+                best_key = key
+                best_sign = "+" if values[0] > values[1] else "-"
+
+        if best_key is None:
+            return "Keep adjusting your pose."
+
+        readable = best_key.replace("_", " ")
+        action = "Increase" if best_sign == "+" else "Decrease"
+        return f"{action} your {readable}."
+
     def update_feedback_async(self, relevant_measurements):
         try:
             llm_output = self.generate_feedback(
@@ -401,7 +423,10 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                 self.feedback_text = llm_output
             logger.debug("LLM feedback: %s", llm_output)
         except Exception as e:
-            logger.error("Exception in update_feedback_async: %s", e)
+            logger.warning("LLM feedback failed, using rule-based fallback: %s", e)
+            fallback = self._rule_based_feedback(relevant_measurements)
+            with self.feedback_lock:
+                self.feedback_text = fallback
         finally:
             self.is_generating_feedback = False
 
