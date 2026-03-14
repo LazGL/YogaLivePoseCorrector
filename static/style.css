@@ -1,0 +1,280 @@
+/* NamastAI — Standalone CSS (extracted and adapted from css_style.py) */
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;900&family=Lora&display=swap');
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    transition: all 0.3s ease-in-out;
+}
+
+body {
+    font-family: 'Poppins', sans-serif;
+    background: linear-gradient(to bottom, #A7C7E7, #F2F9FF);
+    color: #2C3E50;
+    min-height: 100vh;
+    padding: 10px;
+}
+
+h1 {
+    text-align: center;
+    font-size: 2.4em;
+    font-weight: bold;
+    color: #34495E;
+    margin-bottom: 15px;
+}
+
+h2 {
+    text-align: center;
+    font-size: 1.4em;
+    font-weight: 700;
+    color: #2C3E50;
+    margin-bottom: 12px;
+}
+
+h3 {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #2C3E50;
+    margin-bottom: 8px;
+}
+
+/* ===== LAYOUT ===== */
+
+.main-row {
+    display: flex;
+    gap: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+    align-items: flex-start;
+}
+
+.left-column {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.right-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* ===== VIDEO ===== */
+
+.video-container {
+    width: 100%;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+    padding: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#output-canvas {
+    border-radius: 10px;
+    width: 100%;
+    max-width: 640px;
+    height: auto;
+    display: block;
+}
+
+/* ===== STATUS ===== */
+
+#status-display {
+    text-align: center;
+    font-size: 28px;
+    font-weight: 700;
+    font-family: 'Poppins', sans-serif;
+    color: #2C3E50;
+    padding: 12px 20px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 600px;
+}
+
+/* ===== ACCURACY ===== */
+
+#accuracy-display {
+    text-align: center;
+    padding: 15px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    width: 100%;
+    max-width: 400px;
+}
+
+.accuracy-number {
+    font-size: 72px;
+    font-weight: 900;
+    font-family: 'Poppins', sans-serif;
+    line-height: 1;
+}
+
+.accuracy-label {
+    font-size: 16px;
+    color: #7f8c8d;
+    margin-top: 4px;
+}
+
+.accuracy-low  { color: #e74c3c; }
+.accuracy-mid  { color: #f39c12; }
+.accuracy-high { color: #27ae60; }
+
+/* ===== FEEDBACK TEXT ===== */
+
+#custom-textbox {
+    width: 100%;
+    max-width: 600px;
+}
+
+#custom-textbox div,
+#feedback-text {
+    font-size: 22px;
+    font-family: 'Lora', serif;
+    color: #34495E;
+    background-color: rgba(255, 255, 255, 0.9);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    text-align: center;
+    min-height: 60px;
+}
+
+/* ===== MODE PANEL ===== */
+
+.mode-panel {
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ===== BUTTONS ===== */
+
+.btn-primary,
+.btn-secondary,
+.btn-stop {
+    width: 100%;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 12px;
+    font-family: 'Poppins', sans-serif;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-primary {
+    background: #3498db;
+    color: white;
+}
+.btn-primary:hover { background: #2980b9; transform: translateY(-1px); }
+
+.btn-secondary {
+    background: #ecf0f1;
+    color: #2C3E50;
+}
+.btn-secondary:hover { background: #dde1e3; transform: translateY(-1px); }
+
+.btn-stop {
+    background: #e74c3c;
+    color: white;
+}
+.btn-stop:hover { background: #c0392b; transform: translateY(-1px); }
+
+/* ===== PICTOGRAMS ===== */
+
+#pictogram-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+#pictogram-container img {
+    border-radius: 12px;
+    transition: all 0.3s ease-in-out;
+}
+
+/* ===== HISTORY PANEL ===== */
+
+#history-panel {
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+#history-panel summary {
+    font-size: 16px;
+    font-weight: 600;
+    color: #2C3E50;
+    cursor: pointer;
+    padding: 4px 0;
+}
+
+#history-content {
+    margin-top: 10px;
+    overflow-x: auto;
+}
+
+/* ===== CAMERA STATUS OVERLAY ===== */
+
+#camera-status {
+    color: #e74c3c;
+    font-size: 16px;
+    text-align: center;
+    padding: 8px;
+    display: none;
+}
+
+/* ===== RESPONSIVE: PHONE ON GROUND ===== */
+
+@media (max-width: 768px) {
+    h1 { font-size: 1.8em; }
+
+    .main-row {
+        flex-direction: column;
+    }
+
+    .accuracy-number {
+        font-size: 96px;  /* Even larger on mobile — visible from distance */
+    }
+
+    #status-display {
+        font-size: 32px;
+    }
+
+    #custom-textbox div,
+    #feedback-text {
+        font-size: 20px;
+        padding: 12px;
+    }
+}
+
+/* ===== LARGE SCREENS ===== */
+
+@media (min-width: 1200px) {
+    .accuracy-number {
+        font-size: 80px;
+    }
+}

@@ -10,6 +10,34 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+# Pre-computed key sets for O(1) lookup in normalize_and_calculate_adjustments()
+# (replaces repeated `any(term in key for term in [...])` string scanning per measurement)
+_ANGLE_KEYS = frozenset([
+    'right_knee_bend', 'left_knee_bend',
+    'right_knee_over_toes', 'left_knee_over_toes',
+    'right_knee_ankle_alignment', 'left_knee_ankle_alignment',
+    'back_arch', 'pelvis_tilt',
+    'right_elbow_angle', 'left_elbow_angle',
+    'angle_between_legs',
+    'hip_square', 'shoulder_alignment', 'spine_vertical',
+    'head_neck_alignment', 'hip_shoulder_alignment',
+])
+_DISTANCE_KEYS = frozenset([
+    'stance_width', 'stance_width_distance',
+    'distance_between_feet',
+    'right_hands_height', 'left_hand_height', 'hip_height',
+    'right_foot_distance_from_ground', 'left_foot_distance_from_ground',
+    'hips_in_between_feet',
+])
+_INVERT_SIGN_KEYS = frozenset([
+    'right_knee_over_toes', 'left_knee_over_toes',
+    'right_knee_ankle_alignment', 'left_knee_ankle_alignment',
+    'hip_square', 'shoulder_alignment', 'spine_vertical',
+    'pelvis_tilt', 'head_neck_alignment', 'hip_shoulder_alignment',
+    'hips_in_between_feet',
+])
+
+
 class PoseComparison:
     def __init__(self, reference_image_path, model_name="Qwen/Qwen2.5-0.5B-Instruct",
                  reference_tag="standing", max_new_tokens_value=35, device=None):
@@ -70,6 +98,9 @@ class PoseComparison:
         self.reference_tag = reference_tag
         self.max_new_tokens_value = max_new_tokens_value
         self.stored_height = 170
+
+        # B3: Keep reference to LLM feedback thread to prevent concurrent spawning
+        self._feedback_thread: threading.Thread | None = None
         
     def overlay_skeletons(self, target_landmarks, user_landmarks, image):
       """
@@ -248,32 +279,18 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
             if key != "height":
                 if key in test_measurements:
                     # Normalize angles (max value = 180)
-                    if any(term in key for term in ['angle', 'bend', 'tilt', 'arch']):
+                    if key in _ANGLE_KEYS:
                         target_normalized = target_measurements[key] / 180.0 * 100
                         test_normalized = test_measurements[key] / 180.0 * 100
                     # Normalize distances (max value = subject height)
-                    elif any(term in key for term in ['distance', 'height', 'width']):
+                    elif key in _DISTANCE_KEYS:
                         target_normalized = target_measurements[key] / self.stored_height * 100
                         test_normalized = test_measurements[key] / self.stored_height * 100
                     else:
-                            continue  # Skip unsupported measurement types
+                        continue  # Skip unsupported measurement types
 
-                    invert_sign_measurements = [
-                        'right_knee_over_toes',
-                        'left_knee_over_toes',
-                        'right_knee_ankle_alignment',
-                        'left_knee_ankle_alignment',
-                        'hip_square',
-                        'shoulder_alignment',
-                        'spine_vertical',
-                        'pelvis_tilt',
-                        'head_neck_alignment',
-                        'hip_shoulder_alignment',
-                        'hips_in_between_feet'
-                    ]
-
-                    # Calculate adjustment sign with inversion where needed
-                    if key in invert_sign_measurements:
+                    # Calculate adjustment sign with inversion where needed (O(1) lookup)
+                    if key in _INVERT_SIGN_KEYS:
                         adjustment_sign = '-' if target_normalized > test_normalized else '+'
                     else:
                         adjustment_sign = '+' if target_normalized > test_normalized else '-'
@@ -325,16 +342,10 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                     with self._accuracy_lock:
                         self.accuracy_score = accuracy_score
 
-                    # Overlay both skeletons (target in blue, user in green)
-                    image = self.overlay_skeletons(
-                        list(results.pose_landmarks.landmark),   # target ref (will be aligned)
-                        list(results.pose_landmarks.landmark),
-                        image,
-                    )
-                    # Draw reference skeleton overlay when accuracy needs work
+                    # B1: Only overlay the REFERENCE skeleton when accuracy needs work.
+                    # (Removed redundant first call that passed identical user→user landmarks.)
                     if accuracy_score < self.higher_accuracy_threshold:
                         try:
-                            # Build pseudo-landmarks from reference numpy array
                             ref_landmarks = [
                                 mp.framework.formats.landmark_pb2.NormalizedLandmark(
                                     x=float(pt[0]), y=float(pt[1]), z=float(pt[2])
@@ -362,14 +373,16 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                     elif accuracy_score < self.higher_accuracy_threshold:
                         current_time = time.time()
                         if current_time - self.last_feedback_time >= self.feedback_interval:
-                            self.is_generating_feedback = True
-                            relevant = self.get_pose_type_landmarks(
-                                target_measurements, test_measurements, self.reference_tag
-                            )
-                            threading.Thread(
-                                target=self.update_feedback_async, args=(relevant,), daemon=True
-                            ).start()
-                            self.last_feedback_time = current_time
+                            # B3: Only spawn a new thread if the previous one has finished
+                            if self._feedback_thread is None or not self._feedback_thread.is_alive():
+                                relevant = self.get_pose_type_landmarks(
+                                    target_measurements, test_measurements, self.reference_tag
+                                )
+                                self._feedback_thread = threading.Thread(
+                                    target=self.update_feedback_async, args=(relevant,), daemon=True
+                                )
+                                self._feedback_thread.start()
+                                self.last_feedback_time = current_time
                     else:
                         with self.feedback_lock:
                             self.feedback_text = "Perfect! Hold this position."
@@ -390,6 +403,28 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                 score = self.accuracy_score
             return image, round(score, 2)
 
+    def _rule_based_feedback(self, relevant_measurements):
+        """
+        Fallback feedback when the LLM is unavailable.
+        Picks the measurement with the largest difference and returns a simple instruction.
+        """
+        best_key = None
+        best_diff = 0
+        best_sign = "+"
+        for key, values in relevant_measurements.items():
+            diff = abs(values[0] - values[1]) if len(values) >= 2 else 0
+            if diff > best_diff:
+                best_diff = diff
+                best_key = key
+                best_sign = "+" if values[0] > values[1] else "-"
+
+        if best_key is None:
+            return "Keep adjusting your pose."
+
+        readable = best_key.replace("_", " ")
+        action = "Increase" if best_sign == "+" else "Decrease"
+        return f"{action} your {readable}."
+
     def update_feedback_async(self, relevant_measurements):
         try:
             llm_output = self.generate_feedback(
@@ -401,7 +436,10 @@ Do not use numbers and focus on a SINGLE clear helpful instruction, the instruct
                 self.feedback_text = llm_output
             logger.debug("LLM feedback: %s", llm_output)
         except Exception as e:
-            logger.error("Exception in update_feedback_async: %s", e)
+            logger.warning("LLM feedback failed, using rule-based fallback: %s", e)
+            fallback = self._rule_based_feedback(relevant_measurements)
+            with self.feedback_lock:
+                self.feedback_text = fallback
         finally:
             self.is_generating_feedback = False
 

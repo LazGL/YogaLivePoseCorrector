@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NamastAI</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<h1>NamastAI</h1>
+
+<div class="main-row">
+
+    <!-- ===== LEFT COLUMN: Video + Feedback ===== -->
+    <div class="left-column">
+
+        <div class="video-container">
+            <!-- Annotated output shown here -->
+            <canvas id="output-canvas" width="640" height="480"></canvas>
+            <!-- Raw camera feed (hidden — used as source for frame capture) -->
+            <video id="camera-video" autoplay muted playsinline style="display:none;"></video>
+        </div>
+
+        <p id="camera-status">Camera access denied — please allow camera permissions and reload.</p>
+
+        <div id="status-display">Select a mode to begin</div>
+
+        <div id="accuracy-display">
+            <div class="accuracy-number accuracy-low" id="accuracy-number">0%</div>
+            <div class="accuracy-label">Accuracy</div>
+        </div>
+
+        <div id="custom-textbox">
+            <div id="feedback-text"></div>
+        </div>
+
+    </div>
+
+    <!-- ===== RIGHT COLUMN: Controls ===== -->
+    <div class="right-column">
+
+        <h2>Choose Your Mode</h2>
+
+        <div class="mode-panel">
+            <h3>Guided Workouts</h3>
+            <div id="guided-buttons"></div>
+        </div>
+
+        <div class="mode-panel">
+            <h3>Free Practice</h3>
+            <div id="free-buttons"></div>
+        </div>
+
+        <button class="btn-stop" onclick="stopSession()">Stop Session</button>
+
+        <h3 style="text-align:center; margin-top:8px; color:#2C3E50;">Pose Reference</h3>
+        <div id="pictogram-container"></div>
+
+        <details id="history-panel">
+            <summary>Session History</summary>
+            <div id="history-content">
+                <p style="color:#95a5a6; text-align:center; font-size:14px;">Loading…</p>
+            </div>
+            <button class="btn-secondary" onclick="loadHistory()"
+                    style="margin-top:8px; width:100%;">Refresh</button>
+        </details>
+
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
