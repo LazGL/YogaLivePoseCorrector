@@ -123,28 +123,28 @@ function renderPictograms(activePose, completedPoses) {
 
         if (isActive) {
             img.style.cssText = [
-                'border-radius:12px',
+                'border-radius:8px',
                 'border:3px solid #27ae60',
                 'opacity:1.0',
-                'max-width:140px',
+                'max-width:70px',
                 'box-shadow:0 4px 12px rgba(39,174,96,0.3)',
                 'transition:all 0.3s',
             ].join(';');
         } else if (isCompleted) {
             img.style.cssText = [
-                'border-radius:12px',
-                'border:3px solid #95a5a6',
+                'border-radius:8px',
+                'border:2px solid #95a5a6',
                 'opacity:0.7',
-                'max-width:120px',
+                'max-width:60px',
                 'filter:grayscale(50%)',
                 'transition:all 0.3s',
             ].join(';');
         } else {
             img.style.cssText = [
-                'border-radius:12px',
+                'border-radius:8px',
                 'border:2px solid transparent',
                 'opacity:0.5',
-                'max-width:120px',
+                'max-width:60px',
                 'transition:all 0.3s',
             ].join(';');
         }
