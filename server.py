@@ -137,8 +137,13 @@ def _process_frame_sync(img_bytes: bytes) -> Optional[bytes]:
     try:
         np_arr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        if img is None or state.pose_detector is None:
+        if img is None:
             return None
+
+        # No pose selected yet — echo raw frame so the camera feed is always visible
+        if state.pose_detector is None:
+            _, jpeg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            return jpeg.tobytes()
 
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         annotated_rgb, accuracy = state.pose_detector.run(img_rgb)
@@ -386,4 +391,8 @@ def root() -> HTMLResponse:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    print("\n" + "=" * 50)
+    print("  NamastAI is running!")
+    print("  Open in your browser: http://localhost:8000")
+    print("=" * 50 + "\n")
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
